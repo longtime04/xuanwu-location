@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="leaflet.css">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; color:#eef7f3; }
+  #map { position:absolute; inset:0; background:#04231c; }
+  .leaflet-tile-pane { filter:brightness(.8) saturate(.6) contrast(1.05) hue-rotate(-8deg); }
+  .leaflet-control-attribution { display:none; }
+
+  /* ---------- 顶栏：玄武标 + 名字 + GH猫 + 状态丸 ---------- */
+  #topbar { position:absolute; top:0; left:0; right:0; z-index:800; background:rgba(7,38,29,.96);
+            padding:10px 12px 16px; display:flex; align-items:center; gap:9px;
+            box-shadow:0 6px 18px rgba(0,0,0,.35); }
+  #topbar::after { content:''; position:absolute; left:0; right:0; bottom:0; height:9px; opacity:.5;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='10' viewBox='0 0 30 10'%3E%3Cpath d='M7 1 L23 1 L29 9 L1 9 Z' fill='none' stroke='%23dec684' stroke-opacity='.35'/%3E%3C/svg%3E");
+    background-repeat:repeat-x; background-size:30px 10px; }
+  #brandImg { width:38px; height:38px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+  #brandName { font-size:18px; font-weight:700; letter-spacing:2px; color:#eef7f3; }
+  #ghBtn { width:34px; height:34px; border-radius:50%; background:#0a0a0a; border:1px solid rgba(255,255,255,.25);
+           display:flex; align-items:center; justify-content:center; }
+  #ghBtn img { width:21px; height:21px; }
+  #statusPill { margin-left:auto; background:#0a3428; border:1px solid rgba(45,212,191,.35); border-radius:999px;
+                padding:7px 12px; font-size:12px; display:flex; align-items:center; gap:6px; color:#9db8ae; }
+  #statusPill .dot { width:8px; height:8px; border-radius:50%; background:#d97706; }
+  #statusPill.ready .dot { background:#2dd4bf; }
+  #statusPill.running { color:#2dd4bf; }
+  #statusPill.running .dot { background:#2dd4bf; animation:pulse 1.2s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(45,212,191,.45)} 70%{box-shadow:0 0 0 7px rgba(45,212,191,0)} 100%{box-shadow:0 0 0 0 rgba(45,212,191,0)} }
+
+  /* ---------- 搜索 ---------- */
+  #searchbar { position:absolute; top:76px; left:12px; right:12px; z-index:800; background:rgba(8,34,27,.95);
+               border:1px solid rgba(222,198,130,.25); border-radius:14px;
+               box-shadow:0 6px 20px rgba(0,0,0,.4); display:flex; align-items:center; padding:4px 4px 4px 12px; }
+  #searchbar .sic { width:19px; height:19px; opacity:.9; }
+  #searchInput { flex:1; border:0; outline:0; font-size:15px; padding:10px 8px; color:#eef7f3; background:transparent; }
+  #searchInput::placeholder { color:#7d9189; }
+  #searchBtn { background:#dec684; color:#241c05; border:0; border-radius:10px; padding:10px 16px; font-size:14px; font-weight:700; }
+  #searchBtn:active { background:#c9b26e; }
+  #results { position:absolute; top:134px; left:12px; right:12px; z-index:810; background:#0a2e25; border-radius:14px;
+             border:1px solid rgba(222,198,130,.2); box-shadow:0 10px 28px rgba(0,0,0,.5); overflow:hidden; display:none; max-height:46vh; overflow-y:auto; }
+  .result-item { padding:12px 16px; border-bottom:1px solid rgba(255,255,255,.06); }
+  .result-item:last-child { border-bottom:0; }
+  .result-item .rn { font-size:14.5px; font-weight:600; color:#eef7f3; }
+  .result-item .rd { font-size:12px; color:#7d9189; margin-top:2px; line-height:1.45; }
+  .result-empty { padding:14px 16px; font-size:13px; color:#7d9189; }
+
+  /* ---------- 底部控制舱 ---------- */
+  #card { position:absolute; left:0; right:0; bottom:0; z-index:820; background:rgba(8,38,29,.98);
+          border-radius:22px 22px 0 0; border-top:1px solid rgba(222,198,130,.25);
+          box-shadow:0 -10px 30px rgba(0,0,0,.45); padding:6px 16px 12px; max-height:64vh; overflow-y:auto;
+          transition:transform .28s ease; will-change:transform; }
+  #grab { height:26px; display:flex; align-items:center; justify-content:center; touch-action:none; }
+  .grabPill { width:52px; height:5px; border-radius:3px; background:#5f7a6f; }
+  #placeName { font-size:16.5px; font-weight:700; color:#eef7f3; line-height:1.35; }
+  #placeDetail { font-size:12px; color:#7d9189; margin-top:3px; line-height:1.5; word-break:break-all; }
+  #coords { margin-top:9px; background:#06231c; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:8px 11px;
+            font-size:11.5px; color:#9db8ae; font-family:ui-monospace,Menlo,monospace; line-height:1.65; }
+  #coords b { color:#2dd4bf; font-weight:600; }
+  #runInfo { display:none; margin-top:9px; font-size:12.5px; color:#2dd4bf; align-items:center; gap:6px; }
+  #card.running #runInfo { display:flex; }
+  #runInfo .live { width:7px; height:7px; border-radius:50%; background:#2dd4bf; animation:pulse 1.2s infinite; }
+  #battBar { display:none; margin-top:10px; background:rgba(74,46,20,.85); border:1px solid rgba(240,163,94,.35);
+             color:#f0a35e; border-radius:12px; padding:9px 12px; font-size:12.5px; line-height:1.55; }
+  #btnRow { display:flex; gap:10px; margin-top:13px; }
+  .btn { flex:1; border-radius:13px; padding:13px 0; font-size:15px; font-weight:700; border:0;
+         display:flex; align-items:center; justify-content:center; gap:8px; }
+  .btn img { width:21px; height:21px; }
+  .btn-ghost { background:#0d382c; color:#cfe6dd; flex:0 0 100px; border:1px solid rgba(222,198,130,.25); }
+  .btn-ghost:active { background:#114636; }
+  .btn-main { background:#dec684; color:#241c05; box-shadow:0 6px 16px rgba(222,198,130,.25); }
+  .btn-main:active { background:#c9b26e; }
+  .btn-stop { background:#123f31; color:#ff9d94; border:1.5px solid rgba(255,157,148,.4); box-shadow:none; }
+  /* 图标按钮行 */
+  #iconRow { display:flex; justify-content:space-around; margin-top:14px; }
+  .icobtn { display:flex; flex-direction:column; align-items:center; gap:5px; background:none; border:0; color:#cfe6dd;
+            font-size:11.5px; }
+  .icobtn .ring { width:52px; height:52px; border-radius:50%; background:#0d382c; border:1px solid rgba(222,198,130,.3);
+                  display:flex; align-items:center; justify-content:center; }
+  .icobtn img { width:27px; height:27px; }
+  .icobtn.on .ring { background:#155243; border-color:#2dd4bf; box-shadow:0 0 0 2px rgba(45,212,191,.25); }
+  .icobtn:active .ring { background:#114636; }
+  #favForm { display:none; margin-top:12px; gap:8px; }
+  #favForm.show { display:flex; }
+  #favName { flex:1; border:1.5px solid rgba(222,198,130,.3); border-radius:10px; padding:10px 12px; font-size:14px;
+             outline:0; background:#06231c; color:#eef7f3; }
+  #favSave { background:#dec684; color:#241c05; border:0; border-radius:10px; padding:0 16px; font-size:14px; font-weight:700; }
+  /* 路线面板 */
+  #routePanel { display:none; margin-top:12px; background:#06231c; border:1px solid rgba(222,198,130,.22);
+                border-radius:13px; padding:12px 13px; }
+  #routePanel.show { display:block; }
+  #routeHint { font-size:12.5px; color:#9db8ae; line-height:1.6; }
+  #routeAB { font-size:13.5px; color:#eef7f3; margin-top:6px; line-height:1.7; display:none; }
+  #routeAB b { color:#dec684; }
+  #speedRow { display:flex; gap:8px; margin-top:10px; }
+  .chip { flex:1; text-align:center; padding:8px 0; border-radius:999px; font-size:13px; color:#9db8ae;
+          background:#0d382c; border:1px solid rgba(255,255,255,.08); }
+  .chip.on { color:#241c05; background:#dec684; font-weight:700; border-color:#dec684; }
+  #routeBtns { display:flex; gap:10px; margin-top:11px; }
+  .rbtn { flex:1; border-radius:11px; padding:11px 0; font-size:14px; font-weight:700; border:0; }
+  #routeGo { background:#dec684; color:#241c05; }
+  #routeExit { background:#0d382c; color:#cfe6dd; border:1px solid rgba(222,198,130,.25); flex:0 0 96px; }
+  /* 贴士 */
+  #tipToggle { text-align:center; font-size:12px; color:#7d9189; padding:10px 0 2px; }
+  #tipToggle b { color:#9db8ae; }
+  #tipCard { display:none; margin-top:8px; background:#06231c; border:1px solid rgba(255,255,255,.07);
+             border-radius:12px; padding:11px 13px; font-size:12.5px; color:#9db8ae; line-height:1.75; }
+  #tipCard.show { display:block; }
+  #tipCard b { color:#dec684; }
+  #hint { text-align:center; font-size:11px; color:#5f7a6f; padding:7px 0 2px; }
+  /* 电池教程卡 */
+  #battCard { display:none; margin-top:10px; background:#06231c; border:1px solid rgba(240,163,94,.3);
+              border-radius:12px; padding:11px 13px; font-size:12.5px; color:#9db8ae; line-height:1.75; }
+  #battCard.show { display:block; }
+  #battCard b { color:#f0a35e; }
+  #battCard .bbtn { display:block; width:100%; margin-top:10px; background:#dec684; color:#241c05; border:0;
+                    border-radius:10px; padding:11px 0; font-size:14px; font-weight:700; }
+  /* 坐标输入面板 */
+  #coordPanel { display:none; margin-top:12px; background:#06231c; border:1px solid rgba(222,198,130,.22);
+                border-radius:13px; padding:12px 13px; }
+  #coordPanel.show { display:block; }
+  .cpRow { display:flex; gap:8px; }
+  .cpRow input { flex:1; min-width:0; border:1.5px solid rgba(222,198,130,.3); border-radius:10px; padding:10px 11px;
+                 font-size:14px; outline:0; background:#04231c; color:#eef7f3; }
+  #crsRow { display:flex; gap:8px; margin-top:10px; }
+  #coordGo { background:#dec684; color:#241c05; }
+  #coordExit { background:#0d382c; color:#cfe6dd; border:1px solid rgba(222,198,130,.25); flex:0 0 96px; }
+  .cpTip { font-size:12px; color:#7d9189; line-height:1.65; margin-top:9px; }
+  .cpaste { display:flex; gap:8px; margin-top:10px; }
+  .cpaste input { flex:1; min-width:0; border:1.5px solid rgba(255,255,255,.12); border-radius:10px; padding:10px 11px;
+                  font-size:13px; outline:0; background:#04231c; color:#eef7f3; }
+  .cpaste button { background:#0d382c; color:#cfe6dd; border:1px solid rgba(222,198,130,.25); border-radius:10px;
+                   padding:0 14px; font-size:13px; font-weight:700; }
+
+  /* ---------- 收藏抽屉 ---------- */
+  #drawerMask { position:absolute; inset:0; z-index:880; background:rgba(2,12,9,.55); display:none; }
+  #drawer { position:absolute; top:0; right:0; bottom:0; width:78%; max-width:320px; z-index:890; background:#082a20;
+            transform:translateX(105%); transition:transform .28s ease; display:flex; flex-direction:column; }
+  #drawer.open { transform:translateX(0); }
+  #drawerHead { padding:18px 18px 10px; font-size:17px; font-weight:700; color:#eef7f3; display:flex; align-items:center; }
+  #drawerHead span { font-size:12px; color:#7d9189; font-weight:400; margin-left:8px; }
+  #favList { flex:1; overflow-y:auto; padding:4px 12px 16px; }
+  .fav-item { background:#0d382c; border:1px solid rgba(222,198,130,.18); border-radius:13px; padding:12px 13px; margin-top:9px;
+              display:flex; align-items:center; gap:10px; }
+  .fav-item .fi-main { flex:1; min-width:0; }
+  .fav-item .fn { font-size:14.5px; font-weight:600; color:#eef7f3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fav-item .fc { font-size:11px; color:#7d9189; font-family:ui-monospace,Menlo,monospace; margin-top:2px; }
+  .fav-go { background:#dec684; color:#241c05; border:0; border-radius:9px; padding:8px 12px; font-size:12.5px; font-weight:700; }
+  .fav-del { background:transparent; border:0; color:#ff9d94; font-size:12.5px; padding:8px 2px; }
+  .fav-empty { text-align:center; color:#7d9189; font-size:13px; padding:34px 20px; line-height:1.7; }
+
+  /* ---------- 设置向导 ---------- */
+  #wizardMask { position:absolute; inset:0; z-index:900; background:rgba(2,12,9,.6); display:none; align-items:flex-end; }
+  #wizard { background:#082a20; width:100%; border-radius:22px 22px 0 0; padding:22px 20px 26px;
+            border-top:1px solid rgba(222,198,130,.3); }
+  #wizard h2 { font-size:18px; color:#eef7f3; }
+  #wizard .sub { font-size:12.5px; color:#7d9189; margin-top:5px; line-height:1.6; }
+  .step { display:flex; gap:12px; margin-top:16px; }
+  .step .no { flex:0 0 24px; width:24px; height:24px; border-radius:50%; background:#dec684; color:#241c05;
+              font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:1px; }
+  .step .st { font-size:14.5px; font-weight:600; color:#eef7f3; }
+  .step .sd { font-size:12.5px; color:#7d9189; margin-top:2px; line-height:1.6; }
+  #wizBtns { display:flex; gap:10px; margin-top:22px; }
+  /* 地图标记 */
+  .pinMk { width:46px; height:46px; border-radius:50%; background:rgba(9,43,34,.95); border:2.5px solid #dec684;
+           display:flex; align-items:center; justify-content:center; box-shadow:0 6px 16px rgba(0,0,0,.45); }
+  .pinMk img { width:26px; height:26px; }
+  .curMk { width:46px; height:46px; border-radius:50%; background:rgba(10,54,42,.95); border:2.5px solid #2dd4bf;
+           display:flex; align-items:center; justify-content:center; box-shadow:0 6px 16px rgba(0,0,0,.45); }
+  .curMk img { width:28px; height:28px; }
+  .abMk { width:34px; height:34px; border-radius:50%; background:rgba(9,43,34,.95); border:2.5px solid #dec684;
+          color:#dec684; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;
+          box-shadow:0 4px 12px rgba(0,0,0,.4); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="topbar">
+  <img id="brandImg" src="icons/brand.png">
+  <div id="brandName">玄武定位</div>
+  <div id="ghBtn"><img src="icons/github.png"></div>
+  <div id="statusPill"><span class="dot"></span><span id="statusText">检测中…</span></div>
+</div>
+
+<div id="searchbar">
+  <img class="sic" src="icons/search.png">
+  <input id="searchInput" placeholder="搜索地名，如：武汉站、公司地址" enterkeyhint="search">
+  <button id="searchBtn">搜索</button>
+</div>
+<div id="results"></div>
+
+<div id="card">
+  <div id="grab"><div class="grabPill"></div></div>
+  <div id="placeName">点一下地图，选个位置</div>
+  <div id="placeDetail">选好后点「开始模拟」，其他 App 读到的就是这个位置。可以放心切到别的 App，模拟会继续。</div>
+  <div id="coords" style="display:none"></div>
+  <div id="runInfo"><span class="live"></span><span id="runText">模拟中</span></div>
+  <div id="battBar">⚠ <b>电池没设「不限制」</b>：系统会把玄武冻停，位置跳回真实。<b>点这里看你手机品牌怎么设 ›</b></div>
+  <div id="battCard">
+    位置跳回真实，多半是电池白名单没做。按你的手机品牌对号入座：<br>
+    <b>华为 / 鸿蒙</b>：设置 → 应用和服务 → 应用启动管理 → 玄武定位 → 关掉「自动管理」，自启动 / 关联启动 / 后台活动三个开关全开；再进应用信息 → 耗电 → 选「不限制」。<br>
+    <b>小米</b>：设置 → 应用设置 → 应用管理 → 玄武定位 → 打开「自启动」，省电策略选「无限制」。<br>
+    <b>OPPO / 一加</b>：设置 → 电池 → 应用耗电管理 → 玄武定位 → 打开「允许完全后台行为」与「允许自启动」。<br>
+    <b>vivo</b>：设置 → 电池 → 后台耗电管理 → 玄武定位 → 选「允许高后台耗电」，并在应用管理里开自启动。<br>
+    <b>三星</b>：设置 → 电池 → 后台使用限制 → 「从不自动休眠的应用」里加上玄武定位。<br>
+    <b>其他安卓</b>：设置 → 应用 → 玄武定位 → 电池 → 选「不限制」。<br>
+    设好回来，这条橙色提醒会自动消失。
+    <button class="bbtn" id="battGo">去电池设置（尽力直达）</button>
+  </div>
+  <div id="btnRow">
+    <button class="btn btn-ghost" id="favAddBtn">☆ 收藏</button>
+    <button class="btn btn-main" id="mainBtn">开始模拟</button>
+  </div>
+  <div id="favForm">
+    <input id="favName" placeholder="给这个位置起个名字">
+    <button id="favSave">保存</button>
+  </div>
+  <div id="iconRow">
+    <button class="icobtn" id="favBtn"><span class="ring"><img src="icons/star.png"></span>收藏夹</button>
+    <button class="icobtn" id="joyBtn"><span class="ring"><img src="icons/joystick.png"></span>摇杆</button>
+    <button class="icobtn" id="routeBtn"><span class="ring"><img src="icons/route.png"></span>路线</button>
+    <button class="icobtn" id="coordBtn"><span class="ring"><img src="icons/compass.png"></span>坐标</button>
+    <button class="icobtn" id="locateBtn"><span class="ring"><img src="icons/target.png"></span>回原点</button>
+  </div>
+  <div id="routePanel">
+    <div id="routeHint">路线模式：在地图上点两下，先点<b style="color:#dec684">起点 A</b>，再点<b style="color:#dec684">终点 B</b>，选个速度就能沿直线匀速走过去。</div>
+    <div id="routeAB"></div>
+    <div id="speedRow">
+      <div class="chip" data-v="5">步行 5</div>
+      <div class="chip on" data-v="15">骑行 15</div>
+      <div class="chip" data-v="40">驾车 40</div>
+    </div>
+    <div id="routeBtns">
+      <button class="rbtn" id="routeGo">开始路线</button>
+      <button class="rbtn" id="routeExit">退出</button>
+    </div>
+  </div>
+  <div id="coordPanel">
+    <div class="cpRow">
+      <input id="inLat" placeholder="纬度，如 39.904200" inputmode="decimal">
+      <input id="inLng" placeholder="经度，如 116.407400" inputmode="decimal">
+    </div>
+    <div id="crsRow">
+      <div class="chip on" data-c="gcj">GCJ-02 国内</div>
+      <div class="chip" data-c="wgs">WGS-84 原始</div>
+      <div class="chip" data-c="bd">BD-09 百度</div>
+    </div>
+    <div class="cpTip">从高德、微信、腾讯地图复制的坐标选 GCJ-02；GPS 设备、谷歌地球的是 WGS-84；百度地图的是 BD-09。选错会偏几百米。</div>
+    <div class="cpaste">
+      <input id="pasteTxt" placeholder="或粘贴分享的位置文本 / 链接">
+      <button id="pasteGo">解析</button>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:11px">
+      <button class="rbtn" id="coordGo">定位到这里</button>
+      <button class="rbtn" id="coordExit">收起</button>
+    </div>
+  </div>
+  <div id="tipToggle">微信等 App 显示真实位置？<b>点这里看三招 ›</b></div>
+  <div id="tipCard">
+    微信用的是腾讯自家定位，会扫 Wi-Fi 算真实位置。三招逼它走系统定位：<br>
+    <b>1.</b> 先做个测试：关掉 Wi-Fi（只留移动数据）重启微信，看位置对不对 — 对了就是 Wi-Fi 在出卖你；<br>
+    <b>2.</b> 手机设置 → 定位 → 定位模式改成<b>「仅限设备（GPS）」</b>；<br>
+    <b>3.</b> 定位设置里关掉 <b>Wi-Fi 扫描、蓝牙扫描</b>，改完重启微信。<br>
+    三招都用了还不行，是它在过滤带标记的模拟位置，免 root 到头了（高德不挑，微信挑）。
+  </div>
+  <div id="hint">干净免费 · 无广告 · 不上传你的位置 · 地图数据 © 高德地图</div>
+</div>
+
+<div id="drawerMask"></div>
+<div id="drawer">
+  <div id="drawerHead">我的收藏<span>点「前往」切换</span></div>
+  <div id="favList"></div>
+</div>
+
+<div id="wizardMask">
+  <div id="wizard">
+    <h2>还差一步：把玄武设为模拟位置应用</h2>
+    <div class="sub">这是安卓系统的规矩，不是 App 的限制。设置一次，以后一直生效。</div>
+    <div class="step"><div class="no">1</div><div>
+      <div class="st">先开开发者选项</div>
+      <div class="sd">设置 → 关于手机 → 连点「版本号」7 次（已经开过可跳过）。</div></div></div>
+    <div class="step"><div class="no">2</div><div>
+      <div class="st">选玄武定位</div>
+      <div class="sd">下方按钮打开开发者选项 → 找到「选择模拟位置信息应用」→ 选「玄武定位」。</div></div></div>
+    <div id="wizBtns">
+      <button class="btn btn-ghost" id="wizLater" style="flex:0 0 90px">稍后</button>
+      <button class="btn btn-main" id="wizGo">去开发者设置</button>
+      <button class="btn btn-ghost" id="wizCheck" style="flex:0 0 96px">重新检测</button>
+    </div>
+  </div>
+</div>
+
+<script src="leaflet.js"></script>
+<script>
+/* ===== 坐标转换 WGS-84 <-> GCJ-02（与原生层同一套公开算法） ===== */
+var A=6378245.0, EE=0.00669342162296594323;
+function outCN(lat,lng){return lng<72.004||lng>137.8347||lat<0.8293||lat>55.8271;}
+function tLat(x,y){var r=-100+2*x+3*y+0.2*y*y+0.1*x*y+0.2*Math.sqrt(Math.abs(x));
+  r+=(20*Math.sin(6*x*Math.PI)+20*Math.sin(2*x*Math.PI))*2/3;
+  r+=(20*Math.sin(y*Math.PI)+40*Math.sin(y/3*Math.PI))*2/3;
+  r+=(160*Math.sin(y/12*Math.PI)+320*Math.sin(y*Math.PI/30))*2/3; return r;}
+function tLng(x,y){var r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x));
+  r+=(20*Math.sin(6*x*Math.PI)+20*Math.sin(2*x*Math.PI))*2/3;
+  r+=(20*Math.sin(x*Math.PI)+40*Math.sin(x/3*Math.PI))*2/3;
+  r+=(150*Math.sin(x/12*Math.PI)+300*Math.sin(x/30*Math.PI))*2/3; return r;}
+function wgs2gcj(lat,lng){ if(outCN(lat,lng)) return [lat,lng];
+  var dLat=tLat(lng-105,lat-35), dLng=tLng(lng-105,lat-35);
+  var rad=lat/180*Math.PI, m=Math.sin(rad); m=1-EE*m*m; var sm=Math.sqrt(m);
+  dLat=(dLat*180)/((A*(1-EE))/(m*sm)*Math.PI);
+  dLng=(dLng*180)/(A/sm*Math.cos(rad)*Math.PI);
+  return [lat+dLat, lng+dLng]; }
+function gcj2wgs(lat,lng){ if(outCN(lat,lng)) return [lat,lng];
+  var g=wgs2gcj(lat,lng), wLat=lat-(g[0]-lat), wLng=lng-(g[1]-lng);
+  var g2=wgs2gcj(wLat,wLng); return [wLat-(g2[0]-lat), wLng-(g2[1]-lng)]; }
+function dms(v){ var neg=v<0; v=Math.abs(v); var d=Math.floor(v), m=Math.floor((v-d)*60), s=((v-d)*60-m)*60;
+  return (neg?'-':'')+d+'°'+m+'′'+s.toFixed(1)+'″'; }
+function bd2gcj(lat,lng){ var x=lng-0.0065, y=lat-0.006;
+  var z=Math.sqrt(x*x+y*y)-0.00002*Math.sin(y*Math.PI*3000/180);
+  var th=Math.atan2(y,x)-0.000003*Math.cos(x*Math.PI*3000/180);
+  return [z*Math.sin(th), z*Math.cos(th)]; }
+
+/* ===== 地图 ===== */
+var homeWgs=[30.5928,114.3055];
+var homeGcj=wgs2gcj(homeWgs[0],homeWgs[1]);
+var map=L.map('map',{zoomControl:false, attributionControl:false}).setView(homeGcj,13);
+L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+  {subdomains:['1','2','3','4'], maxZoom:18}).addTo(map);
+var pinIcon=L.divIcon({className:'', html:'<div class="pinMk"><img src="icons/pin.png"></div>', iconSize:[46,46], iconAnchor:[23,23]});
+var curIcon=L.divIcon({className:'', html:'<div class="curMk"><img src="icons/turtle.png"></div>', iconSize:[46,46], iconAnchor:[23,23]});
+function abIcon(ch){ return L.divIcon({className:'', html:'<div class="abMk">'+ch+'</div>', iconSize:[34,34], iconAnchor:[17,17]}); }
+var marker=null, curMarker=null;
+var selected=null;
+var state={running:false, mockSelected:false, startTimeMs:0, name:'', lat:0, lng:0, lastError:'', pushCount:0, verified:false, curLat:0, curLng:0, mode:0, routeDone:false, routeProgress:0, joyShown:false};
+var coordMode=0;
+
+function setPoint(name, detail, wgsLat, wgsLng, fly){
+  selected={name:name||'选定位置', detail:detail||'', wgsLat:wgsLat, wgsLng:wgsLng};
+  var g=wgs2gcj(wgsLat,wgsLng);
+  if(marker) marker.setLatLng(g); else marker=L.marker(g,{icon:pinIcon}).addTo(map);
+  if(fly) map.flyTo(g, Math.max(map.getZoom(),15), {duration:.6});
+  renderCard();
+}
+
+/* ===== 路线模式状态 ===== */
+var routePicking=false, rA=null, rB=null, rSpeed=15, mkA=null, mkB=null, routeLine=null;
+function drawAB(){
+  if(rA){ var ga=wgs2gcj(rA.wgsLat,rA.wgsLng);
+    if(mkA) mkA.setLatLng(ga); else mkA=L.marker(ga,{icon:abIcon('A')}).addTo(map); }
+  if(rB){ var gb=wgs2gcj(rB.wgsLat,rB.wgsLng);
+    if(mkB) mkB.setLatLng(gb); else mkB=L.marker(gb,{icon:abIcon('B')}).addTo(map); }
+  if(rA && rB){
+    var pts=[wgs2gcj(rA.wgsLat,rA.wgsLng), wgs2gcj(rB.wgsLat,rB.wgsLng)];
+    if(routeLine) routeLine.setLatLngs(pts);
+    else routeLine=L.polyline(pts,{color:'#dec684', weight:4, dashArray:'10 8', opacity:.95}).addTo(map);
+  }
+}
+function clearAB(){
+  rA=null; rB=null;
+  if(mkA){ map.removeLayer(mkA); mkA=null; }
+  if(mkB){ map.removeLayer(mkB); mkB=null; }
+  if(routeLine){ map.removeLayer(routeLine); routeLine=null; }
+  el('routeAB').style.display='none';
+}
+function renderRouteAB(){
+  if(rA || rB){
+    el('routeAB').style.display='block';
+    el('routeAB').innerHTML='<b>A</b> '+(rA? rA.wgsLat.toFixed(5)+', '+rA.wgsLng.toFixed(5) : '未选')
+      +' &nbsp;→&nbsp; <b>B</b> '+(rB? rB.wgsLat.toFixed(5)+', '+rB.wgsLng.toFixed(5) : '未选');
+  } else el('routeAB').style.display='none';
+}
+function doRouteGo(){
+  if(!rA || !rB){ XW.toast('先在地图上点两下，选起点 A 和终点 B'); return; }
+  if(!state.mockSelected){ el('wizardMask').style.display='flex'; return; }
+  XW.startRoute(rA.wgsLat, rA.wgsLng, rB.wgsLat, rB.wgsLng, rSpeed, '路线 · 终点B');
+  routePicking=false;
+  el('routeHint').textContent='路线进行中：进度看上方状态行，停止用金色大按钮。';
+  renderCard();
+}
+
+map.on('click', function(e){
+  var w=gcj2wgs(e.latlng.lat, e.latlng.lng);
+  if(routePicking){
+    if(!rA){ rA={wgsLat:w[0], wgsLng:w[1]}; el('routeHint').innerHTML='起点 A 定好了，再点一下地图选<b style="color:#dec684">终点 B</b>。'; }
+    else { rB={wgsLat:w[0], wgsLng:w[1]}; el('routeHint').textContent='A、B 都定了，选个速度，点「开始路线」出发。'; }
+    drawAB(); renderRouteAB(); renderCard();
+    return;
+  }
+  setPoint('地图选点', '', w[0], w[1], false);
+});
+
+/* ===== 卡片渲染 ===== */
+var el=function(id){return document.getElementById(id);};
+function fmt(n){ return n.toFixed(6); }
+function setMainBtn(icon, txt, cls){
+  el('mainBtn').innerHTML='<img src="icons/'+icon+'.png">'+txt;
+  el('mainBtn').className='btn '+cls;
+}
+function renderCard(){
+  var card=el('card');
+  card.className = state.running ? 'running' : '';
+  if(selected){
+    el('placeName').textContent = selected.name;
+    el('placeDetail').textContent = selected.detail || (state.running && state.name===selected.name
+      ? '正在模拟这个位置' : '点「开始模拟」后，其他 App 读到的就是这里');
+    var g=wgs2gcj(selected.wgsLat, selected.wgsLng);
+    var html;
+    if(coordMode===0){
+      html='<b>WGS-84</b> '+fmt(selected.wgsLat)+', '+fmt(selected.wgsLng)
+         +'<br><b>GCJ-02</b> '+fmt(g[0])+', '+fmt(g[1])+' <span style="color:#5f7a6f">（点此切换度分秒）</span>';
+    } else {
+      html='<b>WGS-84</b> '+dms(selected.wgsLat)+' , '+dms(selected.wgsLng)
+         +'<br><b>GCJ-02</b> '+dms(g[0])+' , '+dms(g[1])+' <span style="color:#5f7a6f">（点此切换十进位）</span>';
+    }
+    el('coords').style.display='block';
+    el('coords').innerHTML=html;
+    el('favAddBtn').style.visibility='visible';
+  } else {
+    el('coords').style.display='none';
+    el('favAddBtn').style.visibility='hidden';
+  }
+  if(routePicking && !state.running){
+    setMainBtn('route', (rA && rB) ? '开始路线' : '先在地图选 A、B 点', 'btn-main');
+  } else if(state.running){
+    var same = selected && Math.abs(selected.wgsLat-state.lat)<1e-7 && Math.abs(selected.wgsLng-state.lng)<1e-7;
+    if(state.mode===1 || !selected || same) setMainBtn('stop', '停止模拟', 'btn-stop');
+    else setMainBtn('start', '切换到此处', 'btn-main');
+  } else {
+    setMainBtn('start', '开始模拟', 'btn-main');
+  }
+  if(state.lastError){
+    el('placeDetail').textContent='⚠ '+state.lastError;
+    el('placeDetail').style.color='#ff9d94';
+  } else {
+    el('placeDetail').style.color='';
+  }
+  var pill=el('statusPill'), st=el('statusText');
+  if(state.running){ pill.className='running'; st.textContent='模拟中'; }
+  else if(state.mockSelected){ pill.className='ready'; st.textContent='已就绪'; }
+  else { pill.className=''; st.textContent='未设为模拟应用'; }
+  el('battBar').style.display = (state.battOk === false) ? 'block' : 'none';
+  el('joyBtn').className = 'icobtn' + (state.joyShown ? ' on' : '');
+  el('routeBtn').className = 'icobtn' + (routePicking || el('routePanel').className==='show' ? ' on' : '');
+}
+el('coords').addEventListener('click', function(){ coordMode=1-coordMode; renderCard(); });
+
+/* 时长计时 + 运行中轮询自检状态 */
+var tickN=0;
+setInterval(function(){
+  tickN++;
+  if(state.running && tickN%2===0) window.__refreshState();
+  if(state.running && state.startTimeMs){
+    var tail=' · 已注入 '+(state.pushCount||0)+' 次'+(state.verified ? ' · ✓ 系统已接受' : ' · 等待系统确认…');
+    if(state.mode===1){
+      el('runText').textContent = state.routeDone
+        ? '已到达终点 · 停在 B 点'+tail
+        : '路线模拟中 · 已走 '+Math.round((state.routeProgress||0)*100)+'%'+tail;
+    } else {
+      var sec=Math.floor((Date.now()-state.startTimeMs)/1000);
+      var mm=String(Math.floor(sec/60)).padStart(2,'0'), ss=String(sec%60).padStart(2,'0');
+      el('runText').textContent='模拟中 · '+state.name+' · 已持续 '+mm+':'+ss+tail;
+    }
+  }
+},1000);
+
+/* ===== 主按钮 ===== */
+el('mainBtn').addEventListener('click', function(){
+  if(routePicking && !state.running){ doRouteGo(); return; }
+  if(!selected && !state.running){ XW.toast('先在地图上选一个位置'); return; }
+  if(state.running){
+    var same = selected && Math.abs(selected.wgsLat-state.lat)<1e-7 && Math.abs(selected.wgsLng-state.lng)<1e-7;
+    if(state.mode!==1 && selected && !same){ XW.startMock(selected.wgsLat, selected.wgsLng, selected.name); XW.toast('已切换模拟位置'); }
+    else { XW.stopMock(); XW.hideJoystick(); }
+    return;
+  }
+  if(!state.mockSelected){ el('wizardMask').style.display='flex'; return; }
+  XW.startMock(selected.wgsLat, selected.wgsLng, selected.name);
+});
+
+/* ===== 状态刷新（原生回调） ===== */
+window.__refreshState=function(){
+  try{
+    var s=JSON.parse(XW.getState());
+    var wasRunning=state.running;
+    state=s;
+    if(state.running && !selected){ setPoint(state.name||'模拟中的位置','',state.lat,state.lng,false); }
+    if(state.running && state.curLat){
+      var g=wgs2gcj(state.curLat, state.curLng);
+      if(curMarker) curMarker.setLatLng(g); else curMarker=L.marker(g,{icon:curIcon, interactive:false}).addTo(map);
+    } else if(curMarker){ map.removeLayer(curMarker); curMarker=null; }
+    if(wasRunning && !state.running) XW.hideJoystick();
+    renderCard();
+  }catch(e){}
+};
+
+/* ===== 顶栏 GH 猫 ===== */
+el('ghBtn').addEventListener('click', function(){ XW.openUrl('https://github.com/longtime04'); });
+
+/* ===== 摇杆 ===== */
+el('joyBtn').addEventListener('click', function(){
+  if(!state.running){ XW.toast('先开始模拟，再开摇杆'); return; }
+  if(state.joyShown){ XW.hideJoystick(); setTimeout(window.__refreshState, 300); return; }
+  if(!XW.hasOverlay()){ XW.toast('摇杆需要「悬浮窗」权限，去开启一下'); XW.openOverlaySettings(); return; }
+  XW.showJoystick();
+  setTimeout(window.__refreshState, 400);
+});
+
+/* ===== 路线按钮与面板 ===== */
+el('routeBtn').addEventListener('click', function(){
+  var p=el('routePanel');
+  if(p.className==='show'){ p.className=''; routePicking=false; clearAB(); }
+  else {
+    p.className='show'; routePicking=true;
+    el('routeHint').innerHTML='路线模式：在地图上点两下，先点<b style="color:#dec684">起点 A</b>，再点<b style="color:#dec684">终点 B</b>，选个速度就能沿直线匀速走过去。';
+  }
+  renderCard();
+});
+el('routeGo').addEventListener('click', doRouteGo);
+el('routeExit').addEventListener('click', function(){
+  el('routePanel').className=''; routePicking=false; clearAB(); renderCard();
+});
+var chips=document.querySelectorAll('#speedRow .chip');
+chips.forEach(function(ch){
+  ch.addEventListener('click', function(){
+    chips.forEach(function(c){ c.className='chip'; });
+    ch.className='chip on';
+    rSpeed=parseFloat(ch.getAttribute('data-v'));
+  });
+});
+
+/* ===== 微信贴士 ===== */
+el('tipToggle').addEventListener('click', function(){
+  var t=el('tipCard'); t.className = (t.className==='show') ? '' : 'show';
+});
+
+/* ===== 搜索 ===== */
+var searchSeq=0;
+var favShown=false;
+function doSearch(){
+  var q=el('searchInput').value.trim();
+  if(!q) return;
+  el('results').style.display='block';
+  var favs=getFavs().filter(function(f){ return f.name.indexOf(q)>=0; });
+  favShown = favs.length>0;
+  if(favShown) renderFavMatches(favs);
+  else el('results').innerHTML='<div class="result-empty">搜索中…</div>';
+  XW.search(q, ++searchSeq);
+}
+function renderFavMatches(favs){
+  var box=el('results'); box.innerHTML='';
+  var head=document.createElement('div'); head.className='result-empty';
+  head.style.padding='10px 16px 2px'; head.textContent='★ 我的收藏';
+  box.appendChild(head);
+  favs.forEach(function(f){
+    var div=document.createElement('div'); div.className='result-item';
+    div.innerHTML='<div class="rn"></div><div class="rd">收藏的位置</div>';
+    div.querySelector('.rn').textContent=f.name;
+    div.addEventListener('click', function(){
+      box.style.display='none';
+      setPoint(f.name, '收藏的位置', f.wgsLat, f.wgsLng, true);
+    });
+    box.appendChild(div);
+  });
+  var tail=document.createElement('div'); tail.className='result-empty fav-tail';
+  tail.style.padding='6px 16px 10px'; tail.textContent='网络搜索中…';
+  box.appendChild(tail);
+}
+el('searchBtn').addEventListener('click', doSearch);
+el('searchInput').addEventListener('keydown', function(e){ if(e.key==='Enter') doSearch(); });
+window.__onSearch=function(seq, jsonStr){
+  if(seq!==searchSeq) return;
+  var box=el('results');
+  var arr=[];
+  try{ arr=JSON.parse(jsonStr); }catch(e){}
+  if(!arr.length){
+    if(favShown){ var tail=box.querySelector('.fav-tail'); if(tail) tail.textContent='网络没有更多结果'; return; }
+    box.innerHTML='<div class="result-empty">没找到这个地方，换个说法试试（或直接点地图选点）</div>'; return;
+  }
+  favShown=false;
+  box.innerHTML='';
+  arr.forEach(function(it){
+    var div=document.createElement('div'); div.className='result-item';
+    var short=(it.display_name||'').split(',')[0];
+    div.innerHTML='<div class="rn"></div><div class="rd"></div>';
+    div.querySelector('.rn').textContent=short;
+    div.querySelector('.rd').textContent=it.display_name||'';
+    div.addEventListener('click', function(){
+      box.style.display='none';
+      setPoint(short, it.display_name, parseFloat(it.lat), parseFloat(it.lon), true);
+    });
+    box.appendChild(div);
+  });
+};
+document.addEventListener('click', function(e){
+  if(!el('results').contains(e.target) && e.target!==el('searchInput') && e.target!==el('searchBtn'))
+    el('results').style.display='none';
+});
+
+/* ===== 我的位置（回原点） ===== */
+el('locateBtn').addEventListener('click', function(){ XW.locateMe(); XW.toast('正在定位…'); });
+window.__onRealLoc=function(wgsLat, wgsLng){
+  var g=wgs2gcj(wgsLat, wgsLng);
+  map.flyTo(g, 16, {duration:.6});
+};
+
+/* ===== 收藏 ===== */
+function getFavs(){ try{ return JSON.parse(XW.getFavorites()); }catch(e){ return []; } }
+function setFavs(f){ XW.saveFavorites(JSON.stringify(f)); }
+el('favAddBtn').addEventListener('click', function(){
+  if(!selected) return;
+  el('favForm').className='show';
+  el('favName').value = selected.name==='地图选点' ? '' : selected.name;
+  el('favName').focus();
+});
+el('favSave').addEventListener('click', function(){
+  var name=el('favName').value.trim() || '我的位置';
+  var favs=getFavs();
+  favs.unshift({name:name, wgsLat:selected.wgsLat, wgsLng:selected.wgsLng});
+  setFavs(favs);
+  el('favForm').className='';
+  XW.toast('已收藏「'+name+'」');
+});
+function renderFavs(){
+  var list=el('favList'), favs=getFavs();
+  if(!favs.length){ list.innerHTML='<div class="fav-empty">还没有收藏。<br>选好位置后点卡片上的「☆ 收藏」，<br>下次一键直达。</div>'; return; }
+  list.innerHTML='';
+  favs.forEach(function(f, idx){
+    var div=document.createElement('div'); div.className='fav-item';
+    div.innerHTML='<div class="fi-main"><div class="fn"></div><div class="fc"></div></div>'
+      +'<button class="fav-go">前往</button><button class="fav-del">删除</button>';
+    div.querySelector('.fn').textContent=f.name;
+    div.querySelector('.fc').textContent=f.wgsLat.toFixed(5)+', '+f.wgsLng.toFixed(5);
+    div.querySelector('.fav-go').addEventListener('click', function(){
+      closeDrawer(); setPoint(f.name, '收藏的位置', f.wgsLat, f.wgsLng, true);
+    });
+    div.querySelector('.fav-del').addEventListener('click', function(){
+      var arr=getFavs(); arr.splice(idx,1); setFavs(arr); renderFavs();
+    });
+    list.appendChild(div);
+  });
+}
+function openDrawer(){ renderFavs(); el('drawerMask').style.display='block'; el('drawer').className='open'; }
+function closeDrawer(){ el('drawerMask').style.display='none'; el('drawer').className=''; }
+el('favBtn').addEventListener('click', openDrawer);
+el('drawerMask').addEventListener('click', closeDrawer);
+
+el('battBar').addEventListener('click', function(){
+  var b=el('battCard'); b.className = (b.className==='show') ? '' : 'show';
+});
+el('battGo').addEventListener('click', function(){ XW.openBatterySettings(); });
+
+/* ===== 坐标输入面板 ===== */
+var crsMode='gcj';
+el('coordBtn').addEventListener('click', function(){
+  var p=el('coordPanel');
+  p.className = (p.className==='show') ? '' : 'show';
+  el('coordBtn').className = 'icobtn' + (p.className==='show' ? ' on' : '');
+});
+el('coordExit').addEventListener('click', function(){
+  el('coordPanel').className=''; el('coordBtn').className='icobtn';
+});
+var crsChips=document.querySelectorAll('#crsRow .chip');
+crsChips.forEach(function(ch){
+  ch.addEventListener('click', function(){
+    crsChips.forEach(function(c){ c.className='chip'; });
+    ch.className='chip on';
+    crsMode=ch.getAttribute('data-c');
+  });
+});
+el('coordGo').addEventListener('click', function(){
+  var la=parseFloat(el('inLat').value), lo=parseFloat(el('inLng').value);
+  if(isNaN(la) || isNaN(lo) || la<-90 || la>90 || lo<-180 || lo>180){
+    XW.toast('经纬度填得不对：纬度 -90~90，经度 -180~180'); return;
+  }
+  var w;
+  if(crsMode==='wgs') w=[la, lo];
+  else if(crsMode==='bd'){ var g=bd2gcj(la, lo); w=gcj2wgs(g[0], g[1]); }
+  else w=gcj2wgs(la, lo);
+  setPoint('坐标定位', '手动输入的坐标', w[0], w[1], true);
+  el('coordPanel').className=''; el('coordBtn').className='icobtn';
+  XW.toast('已定位到输入的坐标，点「开始模拟」即可');
+});
+el('pasteGo').addEventListener('click', function(){
+  var t=el('pasteTxt').value.trim();
+  if(!t){ XW.toast('先把分享内容粘贴进来'); return; }
+  XW.importText(t);
+});
+
+/* ===== 分享导入（原生回调） ===== */
+window.__onShared=function(wgsLat, wgsLng, name){
+  setPoint(name || '分享的位置', '从其他 App 分享导入', wgsLat, wgsLng, true);
+  XW.toast('已导入分享的位置，点「开始模拟」即可');
+};
+
+/* ===== 向导 ===== */
+el('statusPill').addEventListener('click', function(){
+  if(!state.mockSelected) el('wizardMask').style.display='flex';
+});
+el('wizLater').addEventListener('click', function(){ el('wizardMask').style.display='none'; });
+el('wizGo').addEventListener('click', function(){ XW.openDevSettings(); });
+el('wizCheck').addEventListener('click', function(){
+  window.__refreshState();
+  setTimeout(function(){
+    if(state.mockSelected){ el('wizardMask').style.display='none'; XW.toast('设置好了，可以开始模拟'); }
+    else XW.toast('还没检测到，去开发者选项里选「玄武定位」');
+  }, 300);
+});
+
+/* ===== 底部面板拖动：下滑收起露地图，上滑/轻点横条展开 ===== */
+var sheetY=0, dragInfo=null;
+function collapsedMax(){ return Math.max(0, el('card').offsetHeight - 148); }
+function setSheetY(y, animate){
+  var c=el('card');
+  c.style.transition = animate ? 'transform .28s ease' : 'none';
+  sheetY=Math.max(0, Math.min(y, collapsedMax()+30));
+  c.style.transform='translateY('+sheetY+'px)';
+}
+function bindDrag(elm){
+  elm.addEventListener('touchstart', function(e){
+    dragInfo={y0:e.touches[0].clientY, sheet0:sheetY, moved:false};
+    el('card').style.transition='none';
+  }, {passive:true});
+  elm.addEventListener('touchmove', function(e){
+    if(!dragInfo) return;
+    var dy=e.touches[0].clientY-dragInfo.y0;
+    if(Math.abs(dy)>4) dragInfo.moved=true;
+    setSheetY(dragInfo.sheet0+dy, false);
+    e.preventDefault();
+  }, {passive:false});
+  elm.addEventListener('touchend', function(){
+    if(!dragInfo) return;
+    if(!dragInfo.moved) setSheetY(sheetY>0 ? 0 : collapsedMax(), true);
+    else setSheetY(sheetY > collapsedMax()*0.45 ? collapsedMax() : 0, true);
+    dragInfo=null;
+  });
+}
+bindDrag(el('grab'));
+bindDrag(el('placeName'));
+
+/* ===== 初始化 ===== */
+window.__refreshState();
+try{
+  var sh=XW.getShared();
+  if(sh){ var so=JSON.parse(sh); window.__onShared(so.lat, so.lng, so.name); }
+}catch(e){}
+setTimeout(function(){ if(!state.mockSelected) el('wizardMask').style.display='flex'; }, 900);
+</script>
+</body>
+</html>
