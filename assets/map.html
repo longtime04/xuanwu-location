@@ -23,6 +23,9 @@
   #ghBtn { width:34px; height:34px; border-radius:50%; background:#0a0a0a; border:1px solid rgba(255,255,255,.25);
            display:flex; align-items:center; justify-content:center; }
   #ghBtn img { width:21px; height:21px; }
+  #coffeeBtn { width:34px; height:34px; border-radius:50%; background:#0a0a0a; border:1px solid rgba(222,198,132,.55);
+           display:flex; align-items:center; justify-content:center; }
+  #coffeeBtn img { width:21px; height:21px; }
   #statusPill { margin-left:auto; background:#0a3428; border:1px solid rgba(45,212,191,.35); border-radius:999px;
                 padding:7px 12px; font-size:12px; display:flex; align-items:center; gap:6px; color:#9db8ae; }
   #statusPill .dot { width:8px; height:8px; border-radius:50%; background:#d97706; }
@@ -183,6 +186,7 @@
   <img id="brandImg" src="icons/brand.png">
   <div id="brandName">玄武定位</div>
   <div id="ghBtn"><img src="icons/github.png"></div>
+  <div id="coffeeBtn"><img src="icons/coffee.png"></div>
   <div id="statusPill"><span class="dot"></span><span id="statusText">检测中…</span></div>
 </div>
 
@@ -498,6 +502,7 @@ window.__refreshState=function(){
 
 /* ===== 顶栏 GH 猫 ===== */
 el('ghBtn').addEventListener('click', function(){ XW.openUrl('https://github.com/longtime04'); });
+el('coffeeBtn').addEventListener('click', function(){ XW.openUrl('https://longtime04.github.io/donate/'); });
 
 /* ===== 摇杆 ===== */
 el('joyBtn').addEventListener('click', function(){
